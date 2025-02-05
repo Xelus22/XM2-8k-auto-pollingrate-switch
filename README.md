@@ -3,7 +3,12 @@
 - Only supports xm2 8k
 - Checks the current title of the active window and then switches to 1k
 - Otherwise switches to 8k
-- Thanks to https://github.com/niansa/UnofficialEGGMouseConfi
+- Thanks to https://github.com/niansa/UnofficialEGGMouseConfig
+
+## Internals
+- Checks current selected application every 5 seconds when enabled
+- Checks every second when disabled
+- Only changes polling rate
 
 ## Caveats
 - Yes its 3.4MB (windows) but it lives in systray
