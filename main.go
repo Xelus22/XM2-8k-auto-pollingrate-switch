@@ -60,7 +60,7 @@ func startWindowMonitor() {
 			fmt.Println("Window changed:", title)
 
 			// Check for target window title
-			// check if valorant is a substring of the title
+			// EDIT ME IF YOU WANT TO CHANGE WHAT WINDOW TO DETECT
 			if strings.Contains(strings.ToLower(title), "league") {
 				fmt.Println("WE IN LEAGUE")
 				set1k()
