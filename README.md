@@ -5,6 +5,9 @@
 - Otherwise switches to 8k
 - Thanks to https://github.com/niansa/UnofficialEGGMouseConfig
 
+- ![image](https://github.com/user-attachments/assets/4db6b822-8ed2-42f4-a807-56a98fd15f91)
+
+
 ## Internals
 - Checks current selected application every 5 seconds when enabled
 - Checks every second when disabled
