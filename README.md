@@ -11,7 +11,7 @@
 - Only changes polling rate
 
 ## Caveats
-- Yes its 3.4MB (windows) but it lives in systray
+- Yes its 3.4MB (windows) but it lives in systray (golang was fast to write)
 - Should be cross platform compatible. You can try compile urself
 - ONLY tested on windows
 - Linux requires udev rules
