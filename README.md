@@ -16,6 +16,6 @@
 
 ## Caveats
 - Yes its 3.4MB (windows) but it lives in systray (golang was fast to write)
-- Should be cross platform compatible. You can try compile urself
+- Should be cross platform compatible. You can try compile urself (and add in the linux/macOS specific stuff to get the active/focused window)
 - ONLY tested on windows
 - Linux requires udev rules
