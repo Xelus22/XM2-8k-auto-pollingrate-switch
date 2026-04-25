@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -24,6 +25,7 @@ const (
 	EVENT_SYSTEM_FOREGROUND = 0x0003
 	WINEVENT_OUTOFCONTEXT   = 0x0000
 	WINEVENT_INCONTEXT      = 0x0001
+	windowChangeDebounce    = 2 * time.Second
 )
 
 type Msg struct {
@@ -123,29 +125,54 @@ func initWindowEventHook() {
 
 func startWindowMonitor() {
 	var lastWindow uintptr
+	var debounceTimer *time.Timer
+	var debounceCh <-chan time.Time
 
 	for {
-		<-foregroundCheck
-		debugPrintln("Event: foreground window changed")
+		select {
+		case <-foregroundCheck:
+			debugPrintln("Event: foreground window changed")
 
-		if !isEnabled {
-			continue
-		}
-
-		hwnd := getForegroundWindow()
-		if hwnd != lastWindow && hwnd != 0 {
-			lastWindow = hwnd
-			title := getWindowTitle(hwnd)
-			debugPrintln("Window changed:", title)
-
-			if matched, rate := matchWindow(title); matched {
-				debugPrintf("Matched target window, setting %dk\n", rate)
-				setPollingRate(rate)
-			} else {
-				debugPrintln("Defaulting to 8k")
-				set8k()
+			if !isEnabled {
+				continue
 			}
-			setConfig()
+
+			if debounceTimer == nil {
+				debounceTimer = time.NewTimer(windowChangeDebounce)
+			} else {
+				if !debounceTimer.Stop() {
+					select {
+					case <-debounceTimer.C:
+					default:
+					}
+				}
+				debounceTimer.Reset(windowChangeDebounce)
+			}
+
+			debounceCh = debounceTimer.C
+
+		case <-debounceCh:
+			debounceCh = nil
+
+			if !isEnabled {
+				continue
+			}
+
+			hwnd := getForegroundWindow()
+			if hwnd != lastWindow && hwnd != 0 {
+				lastWindow = hwnd
+				title := getWindowTitle(hwnd)
+				debugPrintln("Window changed:", title)
+
+				if matched, rate := matchWindow(title); matched {
+					debugPrintf("Matched target window, setting %dk\n", rate)
+					setPollingRate(rate)
+				} else {
+					debugPrintln("Defaulting to 8k")
+					set8k()
+				}
+				setConfig()
+			}
 		}
 	}
 }
