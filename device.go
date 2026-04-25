@@ -122,7 +122,7 @@ func getDeviceInfo() (string, error) {
 		return nil
 	})
 
-	fmt.Println("Mouse Path: ", mousePath)
+	debugPrintln("Mouse Path: ", mousePath)
 	device, err := hid.OpenPath(mousePath)
 
 	if err != nil {
@@ -144,7 +144,7 @@ func getDeviceInfo() (string, error) {
 	}
 
 	// print buf length
-	fmt.Println("Buf Length: ", len(buf.Bytes()))
+	debugPrintln("Buf Length: ", len(buf.Bytes()))
 
 	var num int
 	num, err = device.SendFeatureReport(buf.Bytes())
@@ -152,7 +152,7 @@ func getDeviceInfo() (string, error) {
 		// print error
 		// print num
 		// print buf length
-		fmt.Println("Num: ", num)
+		debugPrintln("Num: ", num)
 		panic(err)
 	}
 
@@ -179,7 +179,7 @@ func getDeviceInfo() (string, error) {
 	// version
 	var version string
 	version = fmt.Sprintf("%x.%x", config.Pad0[16], config.Pad0[15])
-	fmt.Println(version)
+	debugPrintln(version)
 	return version, nil
 }
 
@@ -218,7 +218,7 @@ func getConfig() {
 	var num int
 	num, err = device.GetFeatureReport(buf.Bytes())
 	if err != nil {
-		fmt.Println(num)
+		debugPrintln(num)
 		panic(err)
 	}
 
@@ -231,11 +231,11 @@ func getConfig() {
 	}
 
 	// print length of buf
-	fmt.Println("Config Buf Length: ", len(buf.Bytes()))
+	debugPrintln("Config Buf Length: ", len(buf.Bytes()))
 	// print out some buf bytes
-	fmt.Println(buf.Bytes())
+	debugPrintln(buf.Bytes())
 
-	fmt.Println("Read Config")
+	debugPrintln("Read Config")
 
 	config.Pad2[0] = 0x02
 	copy(config.Pad3[0:], []byte{0xff, 0xff, 0x0, 0x1, 0x1, 0x0, 0x0, 0xff, 0x1, 0x2, 0xff, 0x0, 0x0, 0x1, 0x3, 0x0, 0xff, 0x0, 0x1, 0x4})
@@ -243,10 +243,10 @@ func getConfig() {
 
 	// read each button config
 	for i := 0; i < 7; i++ {
-		fmt.Println("Button Config ", i)
-		fmt.Println("SPDT: ", config.ButtonConfigs[i].Spdt)
-		fmt.Println("Mapping Type: ", config.ButtonConfigs[i].Mapping.Type)
-		fmt.Println("Mapping: ", config.ButtonConfigs[i].Mapping.Map)
+		debugPrintln("Button Config ", i)
+		debugPrintln("SPDT: ", config.ButtonConfigs[i].Spdt)
+		debugPrintln("Mapping Type: ", config.ButtonConfigs[i].Mapping.Type)
+		debugPrintln("Mapping: ", config.ButtonConfigs[i].Mapping.Map)
 	}
 }
 
@@ -255,7 +255,16 @@ func set8k() {
 		return
 	}
 	config.PollingRateDivider = 1
-	fmt.Println("Config Set to 8k")
+	debugPrintln("Config Set to 8k")
+	bChanged = true
+}
+
+func set4k() {
+	if config.PollingRateDivider == 2 {
+		return
+	}
+	config.PollingRateDivider = 2
+	debugPrintln("Config Set to 4k")
 	bChanged = true
 }
 
@@ -264,8 +273,19 @@ func set1k() {
 		return
 	}
 	config.PollingRateDivider = 8
-	fmt.Println("Config Set to 1k")
+	debugPrintln("Config Set to 1k")
 	bChanged = true
+}
+
+func setPollingRate(rate uint8) {
+	switch rate {
+	case 8:
+		set8k()
+	case 4:
+		set4k()
+	case 1:
+		set1k()
+	}
 }
 
 func setConfig() {
@@ -300,9 +320,9 @@ func setConfig() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("num sent:", num)
+	debugPrintln("num sent:", num)
 
 	bChanged = false
 
-	fmt.Println("Config Set")
+	debugPrintln("Config Set")
 }
