@@ -29,22 +29,18 @@ const (
 )
 
 type Msg struct {
-	hwnd    uintptr
-	message uint32
-	wParam  uintptr
-	lParam  uintptr
-	time    uint32
-	pt      point
+	hwnd     uintptr
+	message  uint32
+	wParam   uintptr
+	lParam   uintptr
+	time     uint32
+	pt       point
+	lPrivate uint32
 }
 
 type point struct {
 	x int32
 	y int32
-}
-
-func getForegroundWindow() uintptr {
-	hwnd, _, _ := procGetForeground.Call()
-	return hwnd
 }
 
 func getWindowTitle(hwnd uintptr) string {
@@ -53,15 +49,20 @@ func getWindowTitle(hwnd uintptr) string {
 	return syscall.UTF16ToString(buf)
 }
 
-var foregroundCheck = make(chan struct{}, 1)
+var foregroundCheck = make(chan uintptr, 1)
 var hookCallback uintptr
 var hookHandle uintptr
 
-func onWindowChange() {
-	debugPrintln("onWindowChange triggered")
+func onWindowChange(hwnd uintptr) {
+	debugPrintf("onWindowChange triggered for hwnd=%d\n", hwnd)
 	select {
-	case foregroundCheck <- struct{}{}:
+	case foregroundCheck <- hwnd:
 	default:
+		select {
+		case <-foregroundCheck:
+		default:
+		}
+		foregroundCheck <- hwnd
 	}
 }
 
@@ -72,7 +73,7 @@ func installWindowEventHook() error {
 		debugPrintf("!!! CALLBACK FIRED: event=%d, hwnd=%d !!!\n", event, hwnd)
 		if event == EVENT_SYSTEM_FOREGROUND && hwnd != 0 {
 			debugPrintln("Foreground event detected!")
-			onWindowChange()
+			onWindowChange(hwnd)
 		}
 		return 0
 	})
@@ -101,8 +102,10 @@ func runMessagePump() {
 	debugPrintln("Starting message pump...")
 	for {
 		var msg Msg
-		ret, _, _ := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		ret, _, err := procGetMessage.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		debugPrintf("GetMessage returned ret=%d message=%d hwnd=%d err=%v\n", ret, msg.message, msg.hwnd, err)
 		if int32(ret) <= 0 {
+			debugPrintln("Message pump exiting")
 			break
 		}
 		procDispatchMsg.Call(uintptr(unsafe.Pointer(&msg)))
@@ -123,55 +126,48 @@ func initWindowEventHook() {
 	}()
 }
 
+func resetDebounceTimer(timer *time.Timer) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
+	timer.Reset(windowChangeDebounce)
+	debugPrintf("Debounce timer reset to %s\n", windowChangeDebounce)
+}
+
 func startWindowMonitor() {
 	var lastWindow uintptr
-	var debounceTimer *time.Timer
-	var debounceCh <-chan time.Time
+	var pendingWindow uintptr
+	debounceTimer := time.NewTimer(time.Hour)
+	if !debounceTimer.Stop() {
+		<-debounceTimer.C
+	}
+	debounceCh := debounceTimer.C
 
 	for {
 		select {
-		case <-foregroundCheck:
-			debugPrintln("Event: foreground window changed")
+		case hwnd := <-foregroundCheck:
+			pendingWindow = hwnd
+			debugPrintf("Event: foreground window changed to hwnd=%d\n", hwnd)
 
 			if !isEnabled {
 				continue
 			}
 
-			if debounceTimer == nil {
-				debounceTimer = time.NewTimer(windowChangeDebounce)
-			} else {
-				if !debounceTimer.Stop() {
-					select {
-					case <-debounceTimer.C:
-					default:
-					}
-				}
-				debounceTimer.Reset(windowChangeDebounce)
-			}
-
-			debounceCh = debounceTimer.C
+			resetDebounceTimer(debounceTimer)
 
 		case <-debounceCh:
-			debounceCh = nil
-
 			if !isEnabled {
 				continue
 			}
 
-			hwnd := getForegroundWindow()
+			hwnd := pendingWindow
 			if hwnd != lastWindow && hwnd != 0 {
 				lastWindow = hwnd
 				title := getWindowTitle(hwnd)
-				debugPrintln("Window changed:", title)
-
-				if matched, rate := matchWindow(title); matched {
-					debugPrintf("Matched target window, setting %dk\n", rate)
-					setPollingRate(rate)
-				} else {
-					debugPrintln("Defaulting to 8k")
-					set8k()
-				}
-				setConfig()
+				applyWindowTitle(title)
 			}
 		}
 	}

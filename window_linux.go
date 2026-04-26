@@ -13,11 +13,7 @@ func startWindowMonitor() {
 
 		time.Sleep(5 * time.Second)
 
-		debugPrintln("Window changed:", "Linux stub - no window detection")
-
-		debugPrintln("WE NOT IN LEAGUE")
-		set8k()
-		setConfig()
+		applyWindowTitle("Linux stub - no window detection")
 	}
 }
 
