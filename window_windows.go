@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -152,14 +153,14 @@ func startWindowMonitor() {
 			pendingWindow = hwnd
 			debugPrintf("Event: foreground window changed to hwnd=%d\n", hwnd)
 
-			if !isEnabled {
+			if atomic.LoadInt32(&isEnabled) == 0 {
 				continue
 			}
 
 			resetDebounceTimer(debounceTimer)
 
 		case <-debounceCh:
-			if !isEnabled {
+			if atomic.LoadInt32(&isEnabled) == 0 {
 				continue
 			}
 
@@ -168,6 +169,7 @@ func startWindowMonitor() {
 				lastWindow = hwnd
 				title := getWindowTitle(hwnd)
 				applyWindowTitle(title)
+				updateStatus()
 			}
 		}
 	}

@@ -2,11 +2,14 @@
 
 package main
 
-import "time"
+import (
+	"sync/atomic"
+	"time"
+)
 
 func startWindowMonitor() {
 	for {
-		if !isEnabled {
+		if atomic.LoadInt32(&isEnabled) == 0 {
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -14,6 +17,7 @@ func startWindowMonitor() {
 		time.Sleep(5 * time.Second)
 
 		applyWindowTitle("macOS stub - no window detection")
+		updateStatus()
 	}
 }
 

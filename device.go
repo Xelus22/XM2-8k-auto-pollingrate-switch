@@ -255,6 +255,7 @@ func set8k() {
 		return
 	}
 	config.PollingRateDivider = 1
+	SetCurrentPollingRate(POLLING_RATE_8K)
 	debugPrintln("Config Set to 8k")
 	bChanged = true
 }
@@ -264,6 +265,7 @@ func set4k() {
 		return
 	}
 	config.PollingRateDivider = 2
+	SetCurrentPollingRate(POLLING_RATE_4K)
 	debugPrintln("Config Set to 4k")
 	bChanged = true
 }
@@ -273,6 +275,7 @@ func set1k() {
 		return
 	}
 	config.PollingRateDivider = 8
+	SetCurrentPollingRate(POLLING_RATE_1K)
 	debugPrintln("Config Set to 1k")
 	bChanged = true
 }
