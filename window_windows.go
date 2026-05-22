@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -50,28 +51,38 @@ func getWindowTitle(hwnd uintptr) string {
 	return syscall.UTF16ToString(buf)
 }
 
-var foregroundCheck = make(chan uintptr, 1)
 var hookCallback uintptr
 var hookHandle uintptr
+var windowStateMu sync.Mutex
+var lastWindow uintptr
+var pendingWindow uintptr
+var debounceTimer = time.AfterFunc(windowChangeDebounce, handleDebouncedWindowChange)
+
+func init() {
+	debounceTimer.Stop()
+}
 
 func onWindowChange(hwnd uintptr) {
-	debugPrintf("onWindowChange triggered for hwnd=%d\n", hwnd)
-	select {
-	case foregroundCheck <- hwnd:
-	default:
-		select {
-		case <-foregroundCheck:
-		default:
-		}
-		foregroundCheck <- hwnd
+	// debugPrintf("onWindowChange triggered for hwnd=%d\n", hwnd)
+
+	windowStateMu.Lock()
+	defer windowStateMu.Unlock()
+
+	pendingWindow = hwnd
+	// debugPrintf("Event: foreground window changed to hwnd=%d\n", hwnd)
+
+	if atomic.LoadInt32(&isEnabled) == 0 {
+		return
 	}
+
+	resetDebounceTimer(debounceTimer)
 }
 
 func installWindowEventHook() error {
 	debugPrintln("Initializing window event hook...")
 
 	hookCallback = windows.NewCallback(func(eventHook, event, hwnd, idObject, childWnd, threadId, timestamp uintptr) uintptr {
-		debugPrintf("!!! CALLBACK FIRED: event=%d, hwnd=%d !!!\n", event, hwnd)
+		// debugPrintf("!!! CALLBACK FIRED: event=%d, hwnd=%d !!!\n", event, hwnd)
 		if event == EVENT_SYSTEM_FOREGROUND && hwnd != 0 {
 			debugPrintln("Foreground event detected!")
 			onWindowChange(hwnd)
@@ -127,50 +138,24 @@ func initWindowEventHook() {
 	}()
 }
 
-func resetDebounceTimer(timer *time.Timer) {
-	if !timer.Stop() {
-		select {
-		case <-timer.C:
-		default:
-		}
+func handleDebouncedWindowChange() {
+	windowStateMu.Lock()
+	defer windowStateMu.Unlock()
+
+	if atomic.LoadInt32(&isEnabled) == 0 {
+		return
 	}
-	timer.Reset(windowChangeDebounce)
-	debugPrintf("Debounce timer reset to %s\n", windowChangeDebounce)
+
+	if pendingWindow != lastWindow && pendingWindow != 0 {
+		lastWindow = pendingWindow
+		title := getWindowTitle(pendingWindow)
+		applyWindowTitle(title)
+		updateStatus()
+	}
 }
 
-func startWindowMonitor() {
-	var lastWindow uintptr
-	var pendingWindow uintptr
-	debounceTimer := time.NewTimer(time.Hour)
-	if !debounceTimer.Stop() {
-		<-debounceTimer.C
-	}
-	debounceCh := debounceTimer.C
-
-	for {
-		select {
-		case hwnd := <-foregroundCheck:
-			pendingWindow = hwnd
-			debugPrintf("Event: foreground window changed to hwnd=%d\n", hwnd)
-
-			if atomic.LoadInt32(&isEnabled) == 0 {
-				continue
-			}
-
-			resetDebounceTimer(debounceTimer)
-
-		case <-debounceCh:
-			if atomic.LoadInt32(&isEnabled) == 0 {
-				continue
-			}
-
-			hwnd := pendingWindow
-			if hwnd != lastWindow && hwnd != 0 {
-				lastWindow = hwnd
-				title := getWindowTitle(hwnd)
-				applyWindowTitle(title)
-				updateStatus()
-			}
-		}
-	}
+func resetDebounceTimer(timer *time.Timer) {
+	timer.Stop()
+	timer.Reset(windowChangeDebounce)
+	debugPrintf("Debounce timer reset to %s\n", windowChangeDebounce)
 }

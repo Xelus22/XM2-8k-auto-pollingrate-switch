@@ -65,7 +65,6 @@ func onReady() {
 	updateStatus()
 
 	initWindowEventHook()
-	go startWindowMonitor()
 
 	go func() {
 		for {
