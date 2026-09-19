@@ -71,7 +71,8 @@ func onReady() {
 			select {
 			case <-mEnable.ClickedCh:
 				systrayMu.Lock()
-				if atomic.SwapInt32(&isEnabled, 1-atomic.LoadInt32(&isEnabled)) == 1 {
+				atomic.SwapInt32(&isEnabled, 1-atomic.LoadInt32(&isEnabled))
+				if atomic.LoadInt32(&isEnabled) == 1 {
 					mEnable.SetTitle("Disable")
 				} else {
 					mEnable.SetTitle("Enable")

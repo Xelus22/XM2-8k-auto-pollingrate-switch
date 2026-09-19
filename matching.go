@@ -9,7 +9,7 @@ type TargetWindow struct {
 
 var targetWindows = []TargetWindow{
 	{Name: "league", Rate: POLLING_RATE_1K},
-	{Name: "kovaak", Rate: POLLING_RATE_4K},
+	{Name: "getting over it", Rate: POLLING_RATE_1K},
 }
 
 func matchWindow(title string) (bool, uint8) {

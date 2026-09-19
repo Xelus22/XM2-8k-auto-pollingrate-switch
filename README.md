@@ -10,8 +10,9 @@
 
 
 ## Internals
-- Checks current selected application every 5 seconds when enabled
-- Checks every second when disabled
+- Uses a Windows foreground window event hook instead of polling
+- Debounces window changes for 2 seconds before applying a new rate
+- Reads the current title of the active window and matches against configured targets
 - Only changes polling rate
 
 ## Caveats
