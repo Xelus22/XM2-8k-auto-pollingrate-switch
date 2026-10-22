@@ -105,7 +105,10 @@ func main() {
 
 	fwVerString = value
 
-	getConfig()
+	if err := getConfig(); err != nil {
+		debugPrintln("Error: ", err)
+		syscall.Exit(1)
+	}
 
 	systray.Run(onReady, onExit)
 }

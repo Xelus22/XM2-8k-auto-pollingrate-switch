@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/sstallion/go-hid"
 )
@@ -19,6 +20,24 @@ const (
 	OpCodeFactoryReset OpCode = 0x13a1
 	OpCodeGetFwVersion OpCode = 0x02a1
 )
+
+const (
+	EndgameGearVendorID uint16 = 0x3367
+	XM28KProductID      uint16 = 0x1966
+	XM28KV2ProductID    uint16 = 0x1980
+	configReportID      byte   = 0xa0
+	commandReportID     byte   = 0xa1
+)
+
+type deviceProfile struct {
+	PID  uint16
+	Name string
+}
+
+var supportedDevices = []deviceProfile{
+	{PID: XM28KProductID, Name: "XM2 8k"},
+	{PID: XM28KV2ProductID, Name: "XM2 8k v2"},
+}
 
 type CPI struct {
 	XySplit bool
@@ -45,14 +64,18 @@ type ConfigData struct {
 	AngleSnapping      bool            //26
 	RippleControl      bool            //27
 	MotionSync         bool            //28
-	Pad2               [1]byte         //29
+	ActiveDpiStage     uint8           //29
 	CpiLevels          uint8           //30
-	Pad3               [20]byte        //31
+	StageColors        [20]byte        //31
 	Cpis               [4]CPI          //51
-	Pad4               [6]byte         //71
+	Handedness         [6]byte         //71
 	ButtonConfigs      [7]ButtonConfig //77
-	CustomFlags        uint16          //154
-	Pad5               [913]byte       //992
+	Reserved126        uint8           //126
+	GlassMode          uint8           //127
+	AngleTuning        int8            //128
+	ForceMaxSensorFps  uint8           //129
+	Reserved130        uint8           //130
+	Padding            [910]byte       //131
 }
 
 const (
@@ -107,147 +130,225 @@ type CommandData struct {
 }
 
 var mousePath string
+var deviceName string
 
 var config ConfigData
 
 var bChanged bool = false
 
+func findDevice(vid uint16, pid uint16) (deviceProfile, bool) {
+	if vid != EndgameGearVendorID {
+		return deviceProfile{}, false
+	}
+	for _, device := range supportedDevices {
+		if device.PID == pid {
+			return device, true
+		}
+	}
+	return deviceProfile{}, false
+}
+
 func getDeviceInfo() (string, error) {
+	mousePath = ""
+	deviceName = ""
 
 	hid.Enumerate(hid.VendorIDAny, hid.ProductIDAny, func(info *hid.DeviceInfo) error {
-		// Append the device to the list by copying the struct
-		if info.VendorID == 0x3367 && info.ProductID == 0x1966 && info.Usage == 0x0002 && info.UsagePage == 0xFF01 {
-			mousePath = info.Path
+		if info.Usage == 0x0002 && info.UsagePage == 0xFF01 {
+			if device, ok := findDevice(info.VendorID, info.ProductID); ok {
+				mousePath = info.Path
+				deviceName = device.Name
+			}
 		}
 		return nil
 	})
 
 	debugPrintln("Mouse Path: ", mousePath)
-	device, err := hid.OpenPath(mousePath)
-
-	if err != nil {
-		panic(err)
+	if mousePath == "" {
+		return "", fmt.Errorf("no supported Endgame Gear device found")
 	}
+	debugPrintln("Device: ", deviceName)
 
+	return getFirmwareVersion()
+}
+
+func getFirmwareVersion() (string, error) {
+	device, err := hid.OpenPath(mousePath)
+	if err != nil {
+		return "", err
+	}
 	defer device.Close()
 
-	// write a feature report to the device to get the fw version
 	report := CommandData{
 		Op: OpCodeGetFwVersion,
 	}
 
-	// convert report to byte array
 	var buf bytes.Buffer
-	err = binary.Write(&buf, binary.LittleEndian, report)
-	if err != nil {
-		panic(err)
+	if err := binary.Write(&buf, binary.LittleEndian, report); err != nil {
+		return "", err
 	}
 
-	// print buf length
-	debugPrintln("Buf Length: ", len(buf.Bytes()))
-
-	var num int
-	num, err = device.SendFeatureReport(buf.Bytes())
+	num, err := device.SendFeatureReport(buf.Bytes())
 	if err != nil {
-		// print error
-		// print num
-		// print buf length
-		debugPrintln("Num: ", num)
-		panic(err)
+		return "", err
 	}
-
 	if num != len(buf.Bytes()) {
-		panic("Failed to send feature report")
+		return "", fmt.Errorf("sent %d of %d firmware command bytes", num, len(buf.Bytes()))
 	}
 
-	// Read a feature report from the device
+	time.Sleep(50 * time.Millisecond)
+
 	buf.Reset()
-	config = ConfigData{
+	response := CommandData{
 		Op: OpCodeNone,
 	}
-	err = binary.Write(&buf, binary.LittleEndian, config)
+	if err := binary.Write(&buf, binary.LittleEndian, response); err != nil {
+		return "", err
+	}
 
 	num, err = device.GetFeatureReport(buf.Bytes())
 	if err != nil {
-		panic(err)
+		return "", err
+	}
+	if num < 2 {
+		return "", fmt.Errorf("short firmware response: %d bytes", num)
 	}
 
-	// fmt.Println(buf)
-
-	err = binary.Read(&buf, binary.LittleEndian, &config)
-
-	// version
-	var version string
-	version = fmt.Sprintf("%x.%x", config.Pad0[16], config.Pad0[15])
-	debugPrintln(version)
+	version := formatFirmwareVersion(buf.Bytes())
+	debugPrintln("Firmware: ", version)
 	return version, nil
 }
 
-func getConfig() {
-	if mousePath == "" {
-		getDeviceInfo()
+func formatFirmwareVersion(buf []byte) string {
+	for _, offset := range []int{17, 16, 18, 2, 4, 6} {
+		if offset+1 >= len(buf) {
+			continue
+		}
+		patch := buf[offset]
+		major := buf[offset+1]
+		if major >= 1 && major <= 9 && patch <= 99 {
+			return fmt.Sprintf("V%d.%02d", major, patch)
+		}
+	}
+	for _, offset := range []int{17, 16, 18, 2, 4, 6} {
+		if offset+1 >= len(buf) {
+			continue
+		}
+		value := int(buf[offset]) | int(buf[offset+1])<<8
+		if value >= 50 && value <= 5000 {
+			return fmt.Sprintf("V%.2f", float64(value)/100)
+		}
+	}
+	return "unknown"
+}
+
+func sendCommand(device *hid.Device, op OpCode) error {
+	command := CommandData{
+		Op: op,
 	}
 
-	// open device
-	device, err := hid.OpenPath(mousePath)
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, command); err != nil {
+		return err
+	}
 
+	num, err := device.SendFeatureReport(buf.Bytes())
 	if err != nil {
-		panic(err)
+		return err
+	}
+	if num != len(buf.Bytes()) {
+		return fmt.Errorf("sent %d of %d command bytes", num, len(buf.Bytes()))
+	}
+	return nil
+}
+
+func readConfigReport(device *hid.Device, reportID byte) (ConfigData, error) {
+	var cfg ConfigData
+	cfg.Op = OpCode(reportID)
+
+	var buf bytes.Buffer
+	if err := binary.Write(&buf, binary.LittleEndian, cfg); err != nil {
+		return cfg, err
 	}
 
+	num, err := device.GetFeatureReport(buf.Bytes())
+	if err != nil {
+		return cfg, err
+	}
+	if num < 31 {
+		return cfg, fmt.Errorf("short config response: %d bytes", num)
+	}
+
+	if err := binary.Read(&buf, binary.LittleEndian, &cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+func configLooksValid(cfg *ConfigData) bool {
+	return uint8(cfg.Op>>8) == 0x01 &&
+		cfg.CpiLevels >= 1 && cfg.CpiLevels <= 4 &&
+		cfg.ActiveDpiStage <= 3 &&
+		cfg.PollingRateDivider >= 1 && cfg.PollingRateDivider <= 64 &&
+		cfg.Cpis[0].X >= 10 && cfg.Cpis[0].X <= 30000
+}
+
+func getConfig() error {
+	if mousePath == "" {
+		if _, err := getDeviceInfo(); err != nil {
+			return err
+		}
+	}
+
+	device, err := hid.OpenPath(mousePath)
+	if err != nil {
+		return err
+	}
 	defer device.Close()
 
-	// write loadConfig
-	report := CommandData{
-		Op: OpCodeLoadConfig,
+	var lastErr error
+	for round := 0; round < 3; round++ {
+		if err := sendCommand(device, OpCodeLoadConfig); err != nil {
+			lastErr = err
+			continue
+		}
+		time.Sleep(80 * time.Millisecond)
+
+		delay := 60 * time.Millisecond
+		for poll := 0; poll < 6; poll++ {
+			for _, reportID := range []byte{configReportID, commandReportID} {
+				cfg, err := readConfigReport(device, reportID)
+				if err == nil && configLooksValid(&cfg) {
+					config = cfg
+					debugPrintln("Read Config")
+					for i := 0; i < 7; i++ {
+						debugPrintln("Button Config ", i)
+						debugPrintln("SPDT: ", config.ButtonConfigs[i].Spdt)
+						debugPrintln("Mapping Type: ", config.ButtonConfigs[i].Mapping.Type)
+						debugPrintln("Mapping: ", config.ButtonConfigs[i].Mapping.Map)
+					}
+					return nil
+				}
+				if err != nil {
+					lastErr = err
+				} else {
+					lastErr = fmt.Errorf("invalid config frame from report 0x%02x", reportID)
+				}
+			}
+
+			time.Sleep(delay)
+			if delay < 400*time.Millisecond {
+				delay *= 2
+				if delay > 400*time.Millisecond {
+					delay = 400 * time.Millisecond
+				}
+			}
+		}
 	}
 
-	// convert report to byte array
-	var buf bytes.Buffer
-	err = binary.Write(&buf, binary.LittleEndian, report)
-	if err != nil {
-		panic(err)
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no config response")
 	}
-
-	device.SendFeatureReport(buf.Bytes())
-
-	// Read a feature report from the device
-	buf.Reset()
-
-	err = binary.Write(&buf, binary.LittleEndian, config)
-	var num int
-	num, err = device.GetFeatureReport(buf.Bytes())
-	if err != nil {
-		debugPrintln(num)
-		panic(err)
-	}
-
-	err = binary.Read(&buf, binary.LittleEndian, &config)
-
-	// convert config to bytes
-	err = binary.Write(&buf, binary.LittleEndian, config)
-	if err != nil {
-		panic(err)
-	}
-
-	// print length of buf
-	debugPrintln("Config Buf Length: ", len(buf.Bytes()))
-	// print out some buf bytes
-	debugPrintln(buf.Bytes())
-
-	debugPrintln("Read Config")
-
-	config.Pad2[0] = 0x02
-	copy(config.Pad3[0:], []byte{0xff, 0xff, 0x0, 0x1, 0x1, 0x0, 0x0, 0xff, 0x1, 0x2, 0xff, 0x0, 0x0, 0x1, 0x3, 0x0, 0xff, 0x0, 0x1, 0x4})
-	copy(config.Pad4[0:], []byte{0x0, 0x1, 0x0, 0x0, 0x0, 0x0})
-
-	// read each button config
-	for i := 0; i < 7; i++ {
-		debugPrintln("Button Config ", i)
-		debugPrintln("SPDT: ", config.ButtonConfigs[i].Spdt)
-		debugPrintln("Mapping Type: ", config.ButtonConfigs[i].Mapping.Type)
-		debugPrintln("Mapping: ", config.ButtonConfigs[i].Mapping.Map)
-	}
+	return fmt.Errorf("failed to read config: %w", lastErr)
 }
 
 func set8k() {
@@ -297,31 +398,31 @@ func setConfig() {
 	}
 
 	if mousePath == "" {
-		getDeviceInfo()
+		if _, err := getDeviceInfo(); err != nil {
+			debugPrintln("Error: ", err)
+			return
+		}
 	}
 
-	// open device
 	device, err := hid.OpenPath(mousePath)
-
 	if err != nil {
-		panic(err)
+		debugPrintln("Error: ", err)
+		return
 	}
-
 	defer device.Close()
 
-	// write loadConfig
 	config.Op = OpCodeStoreConfig
 
-	// convert report to byte array
 	var buf bytes.Buffer
-	err = binary.Write(&buf, binary.LittleEndian, config)
-	if err != nil {
-		panic(err)
+	if err := binary.Write(&buf, binary.LittleEndian, config); err != nil {
+		debugPrintln("Error: ", err)
+		return
 	}
 
 	num, err := device.SendFeatureReport(buf.Bytes())
 	if err != nil {
-		panic(err)
+		debugPrintln("Error: ", err)
+		return
 	}
 	debugPrintln("num sent:", num)
 

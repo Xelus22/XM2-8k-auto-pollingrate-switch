@@ -1,10 +1,11 @@
 # Polling rate switcher
 
-- Only supports xm2 8k
+- Supports XM2 8k (PID `0x1966`) and XM2 8k v2 (PID `0x1980`), both VID `0x3367`
 - Checks the current title of the active window and then switches to 1k
 - Otherwise switches to 8k
 - Only 3MB of RAM c:
 - Thanks to https://github.com/niansa/UnofficialEGGMouseConfig
+- Device IDs and packet layout verified against https://github.com/qsxcv/UnofficialEGGWebConfig
 
 - ![image](https://github.com/user-attachments/assets/4db6b822-8ed2-42f4-a807-56a98fd15f91)
 
